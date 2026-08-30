@@ -1,0 +1,1370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Glance</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="A calm home screen for a TV. One HTML file, built on the mHub Browser API.">
+<!-- The boot script gives us mhub.ready: true inside an mHub app, false in a
+     plain browser. Everything else in this file works from that one answer. -->
+<script src="https://mhub.mx/mhub.js"></script>
+<style>
+  :root {
+    --bg: #0a0c11;
+    --card: #12171f;
+    --line: #2b323d;
+    --text: #e8eaed;
+    --dim: #9aa3af;
+    --faint: #7d8794;
+    --accent: #6e9bff;
+    --good: #4ade80;
+    --bad: #f87171;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { color-scheme: dark; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+    padding: 28px;
+  }
+  /* A TV is watched from three meters away; everything simply grows. */
+  body.tv { font-size: 20px; padding: 48px; }
+
+  /* Eight small tiles and one wide one. Fixed column counts, so the eight
+     always fill their rows (4+4 or 2+2+2+2) and the wide one sits below; an
+     auto-fit grid left holes wherever the wide tile did not fit the row. */
+  .grid {
+    display: grid;
+    gap: 16px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    max-width: 1500px;
+    margin: 0 auto;
+  }
+  @media (max-width: 1100px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 640px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+  .tile {
+    position: relative;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 22px 24px;
+    min-height: 140px;
+    animation: rise 300ms var(--ease-out) backwards;
+  }
+  /* One cascade on load, then never again: the tiles refresh in place. */
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+  .tile:nth-child(2) { animation-delay: 40ms; }
+  .tile:nth-child(3) { animation-delay: 80ms; }
+  .tile:nth-child(4) { animation-delay: 120ms; }
+  .tile:nth-child(5) { animation-delay: 160ms; }
+  .tile:nth-child(6) { animation-delay: 200ms; }
+  .tile:nth-child(7) { animation-delay: 240ms; }
+  .tile:nth-child(8) { animation-delay: 280ms; }
+  .tile:nth-child(9) { animation-delay: 320ms; }
+  .tile:nth-child(10) { animation-delay: 360ms; }
+  .tile:nth-child(11) { animation-delay: 400ms; }
+  .tile:nth-child(12) { animation-delay: 440ms; }
+  @media (prefers-reduced-motion: reduce) { .tile { animation: none; } }
+  .tile h2 {
+    font-family: var(--mono);
+    font-size: 0.72em;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin-bottom: 12px;
+  }
+  .tile.wide { grid-column: 1 / -1; }
+  /* A tile that opens a level of its own says so, and takes the focus. */
+  .tile.opens { cursor: pointer; }
+  .tile.opens:hover, .tile.opens:focus-visible { border-color: var(--accent); }
+  .tile.opens h2::after { content: " ›"; color: var(--accent); }
+
+  /* Clock */
+  #time { font-size: 3.6em; font-weight: 700; letter-spacing: -0.03em; line-height: 1.1; }
+  #date { color: var(--dim); margin-top: 4px; }
+
+  /* Weather */
+  #temp { font-size: 2.6em; font-weight: 700; letter-spacing: -0.02em; }
+  #wdesc { color: var(--dim); }
+  #wrange { color: var(--faint); font-size: 0.85em; margin-top: 6px; }
+
+  /* Headlines: two newspaper columns where there is room for them. */
+  @media (min-width: 1101px) { #news, #level .columns { columns: 2; column-gap: 40px; } }
+  .item { padding: 8px 0; border-top: 1px solid var(--line); break-inside: avoid; }
+  .item:first-child { border-top: none; padding-top: 0; }
+  .item .src { font-size: 0.75em; color: var(--faint); }
+
+  /* Markets */
+  .row { display: flex; justify-content: space-between; align-items: baseline; padding: 6px 0; }
+  .row .price { font-family: var(--mono); font-size: 0.95em; }
+  .up { color: var(--good); }
+  .down { color: var(--bad); }
+
+  /* Status */
+  .dot {
+    display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--faint); margin-right: 10px;
+  }
+  .dot.ok { background: var(--good); }
+  .dot.fail { background: var(--bad); }
+  .row .ms { font-family: var(--mono); font-size: 0.85em; color: var(--faint); }
+
+  /* Host: one chip per capability, lit when the host has it. */
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .chip {
+    font-family: var(--mono); font-size: 0.72em; padding: 3px 9px;
+    border-radius: 999px; border: 1px solid var(--line); color: var(--faint);
+  }
+  .chip.on { border-color: var(--good); color: var(--good); }
+
+  /* Radio */
+  .station { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; }
+  .station button {
+    font: inherit; font-size: 0.85em; cursor: pointer; border-radius: 8px; padding: 4px 12px;
+    background: none; color: var(--dim); border: 1px solid var(--line);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .station button:hover { color: var(--text); border-color: var(--accent); }
+  }
+  .station button { transition: transform 160ms var(--ease-out); }
+  .station button:active { transform: scale(0.96); }
+  .station button.playing { color: var(--text); border-color: var(--accent); }
+  .station .who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 10px; }
+  .station button.playing { background: var(--accent); color: #0b0d10; border-color: var(--accent); }
+
+  .hint { color: var(--faint); font-size: 0.9em; }
+  .hint a { color: var(--accent); text-decoration: none; }
+  .hint button {
+    font: inherit; font-size: 0.9em; cursor: pointer; border-radius: 8px; padding: 4px 12px;
+    background: var(--accent); color: #0b0d10; border: none; font-weight: 650;
+  }
+
+  footer {
+    max-width: 1500px;
+    margin: 20px auto 0;
+    display: flex; justify-content: space-between; flex-wrap: wrap;
+    color: var(--faint); font-size: 0.8em;
+  }
+  footer a, footer button {
+    color: var(--dim); text-decoration: none;
+    background: none; border: none; font: inherit; cursor: pointer;
+  }
+  footer a:hover, footer button:hover { color: var(--text); }
+
+  /* Overlays: plain divs, not <dialog>, so old TV browsers keep up. The
+     settings form is one; a tile opened to its full size is the other. */
+  .overlay {
+    position: fixed; inset: 0; display: none;
+    background: rgba(10, 12, 17, 0.86);
+    align-items: center; justify-content: center; padding: 24px;
+  }
+  .overlay.open { display: flex; }
+  .overlay > * {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 24px; width: 100%; max-width: 520px; max-height: 90vh; overflow: auto;
+  }
+  #level > * { max-width: 1100px; }
+  #level h2 { font-size: 1.3em; margin-bottom: 14px; }
+  #level .close { margin-top: 18px; text-align: right; }
+  #settings h2 { font-size: 1.1em; margin-bottom: 2px; }
+  #settings label { display: block; font-size: 0.85em; color: var(--dim); margin: 14px 0 4px; }
+  /* Every tile carries its own settings behind a small gear; it appears on
+     hover or focus, and stays faintly there where no pointer hovers. */
+  .tgear {
+    position: absolute; top: 12px; right: 12px; z-index: 1;
+    background: none; border: none; cursor: pointer; padding: 6px;
+    color: var(--faint); font-size: 1em; line-height: 1; opacity: 0;
+    transition: opacity 160ms var(--ease-out);
+  }
+  .tile:focus-within .tgear, .tgear:focus-visible { opacity: 1; }
+  @media (hover: hover) and (pointer: fine) { .tile:hover .tgear { opacity: 1; } }
+  @media (hover: none) { .tgear { opacity: 0.5; } }
+  body.tv .tgear { opacity: 0.5; }
+  .tgear:hover { color: var(--text); }
+  #fTiles { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+  #fTiles label { display: inline-flex; align-items: center; gap: 6px; margin: 2px 0; color: var(--text); font-size: 0.9em; }
+  #settings input, #settings textarea {
+    width: 100%; background: var(--bg); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 12px; font: inherit; font-size: 0.95em;
+  }
+  #settings textarea { height: 84px; font-family: var(--mono); font-size: 0.8em; }
+  #settings .actions { margin-top: 18px; text-align: right; }
+  .overlay button.primary, .overlay button.ghost {
+    font: inherit; font-size: 0.9em; cursor: pointer;
+    border-radius: 8px; padding: 10px 18px; margin-left: 10px;
+    background: var(--accent); color: #0b0d10; border: none; font-weight: 650;
+  }
+  .overlay button.ghost { background: none; color: var(--dim); border: 1px solid var(--line); }
+  /* Sparkline: the price line of the last week, drawn as one polyline. */
+  .spark { width: 100%; height: 120px; display: block; margin: 8px 0 18px; }
+  .spark polyline { fill: none; stroke: var(--accent); stroke-width: 2; }
+  .spark.small { height: 36px; margin: 10px 0 0; opacity: 0.8; }
+
+  /* A tile that is waiting shows placeholders in the size of what will come,
+     never a spinner; the content lands without the tile changing shape. */
+  .skel { height: 0.9em; border-radius: 6px; background: var(--line); opacity: 0.45; margin: 12px 0; }
+  .skel.short { width: 60%; }
+
+  /* Calendar */
+  .day { font-family: var(--mono); font-size: 0.72em; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--faint); margin: 10px 0 2px; }
+  .day:first-child { margin-top: 0; }
+  .event { display: flex; gap: 10px; padding: 3px 0; }
+  .event .at { font-family: var(--mono); font-size: 0.85em; color: var(--dim); white-space: nowrap; }
+  .event .what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Mediathek: four stills, straight to playback. */
+  .thumbs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .thumb { position: relative; border-radius: 8px; overflow: hidden; background: var(--bg);
+    aspect-ratio: 16/9; cursor: pointer; border: none; padding: 0; display: block; width: 100%; }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .thumb span { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 8px 5px;
+    font-size: 0.72em; line-height: 1.25; color: #fff; text-align: left;
+    background: linear-gradient(transparent, rgba(0,0,0,0.85)); }
+  .thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* The player: video full screen, closed like any level. */
+  #tv { padding: 0; background: #000; }
+  #tv > div { background: none; border: none; border-radius: 0; padding: 0;
+    max-width: none; max-height: none; width: 100%; height: 100%; position: relative; }
+  #tv video { width: 100%; height: 100%; }
+  #tv .close { position: absolute; top: 16px; left: 16px; z-index: 1; }
+  #tv .close button { background: rgba(0,0,0,0.6); border: none; color: #fff; }
+
+  /* What is on right now, under the channel name. */
+  .station .now { display: block; font-size: 0.78em; color: var(--faint);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Channel search, inside the TV level. */
+  #chq { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 10px 12px; font: inherit; margin-bottom: 8px; }
+  :focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+</head>
+<body>
+
+<div class="grid">
+  <div class="tile" data-tile="clock">
+    <h2>Clock</h2>
+    <div id="time">…</div>
+    <div id="date"></div>
+  </div>
+
+  <div class="tile" data-tile="weather">
+    <h2 id="wtitle">Weather</h2>
+    <div id="weather"></div>
+  </div>
+
+  <div class="tile" data-tile="calendar">
+    <h2>Calendar</h2>
+    <div id="calendar"></div>
+  </div>
+
+  <div class="tile opens" id="cryptoTile" data-tile="crypto" tabindex="0" role="button" aria-label="Crypto, open the week">
+    <h2>Crypto</h2>
+    <div id="markets"></div>
+  </div>
+
+  <div class="tile" data-tile="stocks">
+    <h2>Stocks &amp; metals</h2>
+    <div id="stocks"></div>
+  </div>
+
+  <div class="tile" data-tile="fx">
+    <h2>Currencies</h2>
+    <div id="fx"></div>
+  </div>
+
+  <div class="tile" data-tile="status">
+    <h2>Status</h2>
+    <div id="status"></div>
+  </div>
+
+  <div class="tile opens" id="pricesTile" data-tile="prices" tabindex="0" role="button" aria-label="Price watch, open the history">
+    <h2>Price watch</h2>
+    <div id="prices"></div>
+  </div>
+
+  <div class="tile" data-tile="radio">
+    <h2>Radio</h2>
+    <div id="radio"></div>
+  </div>
+
+  <div class="tile opens" id="tvTile" data-tile="tv" tabindex="0" role="button" aria-label="Live TV, find channels">
+    <h2>Live TV</h2>
+    <div id="tvlist"></div>
+  </div>
+
+  <div class="tile" data-tile="mediathek">
+    <h2 id="mtitle">Mediathek</h2>
+    <div id="mediathek"></div>
+  </div>
+
+  <div class="tile" data-tile="host">
+    <h2>Host</h2>
+    <div id="host"><span class="hint">Checking…</span></div>
+  </div>
+
+  <div class="tile wide opens" id="newsTile" data-tile="news" tabindex="0" role="button" aria-label="Headlines, open all">
+    <h2>Headlines</h2>
+    <div id="news"></div>
+  </div>
+</div>
+
+<footer>
+  <div id="mode">Checking for an mHub host…</div>
+  <div>
+    <button id="gear">Tiles</button>
+    &nbsp;·&nbsp;
+    <a href="https://mhub.mx">Built on the mHub Browser API</a>
+  </div>
+</footer>
+
+<!-- One dialog, filled per tile: only the fields of the tile it was opened
+     for, from its gear or its empty state. The footer opens the same dialog
+     with the tile list. -->
+<div id="settings" class="overlay">
+  <form id="settingsForm">
+    <h2 id="settingsTitle"></h2>
+    <div id="settingsBody"></div>
+    <div class="actions">
+      <button type="button" class="ghost" id="cancel">Cancel</button>
+      <button type="submit" class="primary">Save</button>
+    </div>
+  </form>
+</div>
+
+<!-- The TV player, full screen. A level like any other: back closes it. -->
+<div id="tv" class="overlay">
+  <div>
+    <div class="close"><button type="button" class="ghost" id="tvClose">Back</button></div>
+    <video controls playsinline></video>
+  </div>
+</div>
+
+<!-- A tile at full size. One level deep, and the back button knows it. -->
+<div id="level" class="overlay">
+  <div>
+    <h2 id="levelTitle"></h2>
+    <div id="levelBody"></div>
+    <div class="close"><button type="button" class="ghost" id="levelClose">Back</button></div>
+  </div>
+</div>
+
+<script>
+(async () => {
+  const $ = (id) => document.getElementById(id);
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  // ------------------------------------------------------------ the host --
+  // One question decides everything else: is an mHub host attached? With the
+  // boot script loaded, window.mhub always exists and mhub.ready is the
+  // honest answer. If even the boot script failed to load (offline), we act
+  // like a plain browser.
+  const hosted = window.mhub && window.mhub.ready
+    ? await window.mhub.ready
+    : false;
+  const device = (hosted && window.mhub.device) || {};
+  const caps = (hosted && window.mhub.capabilities) || [];
+  const can = (c) => caps.indexOf(c) !== -1;
+
+  if (device.isTV) document.body.classList.add("tv");
+
+  // An empty tile explains itself and offers the one step that fills it,
+  // straight into its own settings.
+  let openTileSettings = null;
+  const settingsHint = (el, text, tile) => {
+    el.innerHTML = '<span class="hint">' + text +
+      ' <button type="button">Add</button></span>';
+    el.querySelector("button").addEventListener("click", () => openTileSettings(tile));
+  };
+
+  // Placeholders in the size of what will come; the tile never changes shape.
+  const skel = (n) => {
+    let out = "";
+    for (let i = 0; i < n; i++) out += '<div class="skel' + (i === n - 1 ? " short" : "") + '"></div>';
+    return out;
+  };
+  ["weather", "calendar", "markets", "stocks", "fx", "status", "prices", "tvlist", "mediathek", "news"]
+    .forEach((id) => { $(id).innerHTML = skel(id === "news" ? 4 : 3); });
+  const applyHidden = () => {
+    document.querySelectorAll("[data-tile]").forEach((el) => {
+      el.style.display = config.hidden.indexOf(el.getAttribute("data-tile")) === -1 ? "" : "none";
+    });
+  };
+
+  // A tile on the app's home screen, so the way back here survives.
+  if (hosted) {
+    window.mhub.setLinks([{ id: "glance", name: "Glance", url: "./" }]);
+  }
+
+  // mhub.fetch has no CORS and may talk to the local network; plain fetch is
+  // the fallback and simply fails where a browser says no. Tiles handle that.
+  const get = (url, opts) => (hosted ? window.mhub.fetch(url, opts) : fetch(url, opts));
+
+  // Settings follow the site via mhub.storage (they survive a domain move);
+  // in a plain browser localStorage keeps them on this domain.
+  const store = {
+    get: (k) => hosted ? window.mhub.storage.get(k) : Promise.resolve(localStorage.getItem(k)),
+    set: (k, v) => hosted ? window.mhub.storage.set(k, v) : Promise.resolve(localStorage.setItem(k, v)),
+  };
+
+  const DEFAULTS = {
+    city: "Zurich",
+    ics: [],
+    coins: ["bitcoin", "ethereum"],
+    channels: [
+      { name: "DW English", id: "-14743935045", url: "https://amg01644-amg01644c1-amgplt0343.playout.now3.amagi.tv/ts-eu-w1-n2/playlist/amg01644-amg01644c1-amgplt0343/playlist.m3u8" },
+    ],
+    prices: [],
+    hidden: [],
+    feeds: [
+      "https://feeds.bbci.co.uk/news/world/rss.xml",
+      "https://www.theverge.com/rss/index.xml",
+    ],
+    symbols: ["GC=F", "SI=F", "AAPL", "MSFT", "NVDA"],
+    fx: ["USD", "CHF", "GBP", "JPY"],
+    status: [],
+  };
+  let config = DEFAULTS;
+  try {
+    const raw = await store.get("config");
+    if (raw) config = Object.assign({}, DEFAULTS, JSON.parse(raw));
+  } catch (e) { /* first visit */ }
+  const save = () => store.set("config", JSON.stringify(config));
+  applyHidden();
+
+  // ---------------------------------------------------------- permission --
+  // The host tells us, through the mhubupdate event, whether this site may use
+  // the web: "allow", "ask" (the next mhub.fetch will prompt) or "deny". A
+  // tile that needs it shows a button instead of dying quietly, and the
+  // button simply makes a request, which is what opens the dialog. When the
+  // answer changes, the tiles that were waiting wake up by themselves.
+  let permission = hosted ? "ask" : "none";
+  const asleep = (el, what) => {
+    if (!hosted) {
+      el.innerHTML = '<span class="hint">' + what +
+        ' needs the powers of an mHub app. In a plain browser this tile sleeps. ' +
+        '<a href="https://mhub.mx">Why?</a></span>';
+    } else {
+      el.innerHTML = '<span class="hint">' + what + ' needs web access for this site. ' +
+        '<button type="button" class="grant">Allow</button></span>';
+      el.querySelector(".grant").addEventListener("click", () => {
+        // Any request opens the dialog; the decision arrives as an event.
+        get("https://mhub.mx/mhub-api.md").catch(() => {});
+      });
+    }
+  };
+  const needsWeb = (el, what) => {
+    if (permission === "deny" || permission === "none") { asleep(el, what); return false; }
+    return true;
+  };
+  addEventListener("mhubupdate", (e) => {
+    const d = e.detail || {};
+    if (d.kind === "permission" && d.name === "fetch") {
+      const before = permission;
+      permission = d.state;
+      if (permission !== before) { stocks(); fx(); status(); news(); calendar(); prices(); }
+      mode();
+    }
+    if (d.kind === "device") {
+      document.body.classList.toggle("tv", !!(d.device && d.device.isTV));
+    }
+  });
+  const mode = () => {
+    $("mode").textContent = !hosted
+      ? "Running in a plain browser. Tiles that need mHub powers are asleep."
+      : permission === "deny"
+        ? "Running inside an mHub app, but web access is blocked for this site."
+        : "Running inside an mHub app. All tiles are awake.";
+  };
+  mode();
+
+  // ---------------------------------------------------------------- host --
+  // What this host can do, read straight off the API: the device axes and the
+  // capability list. Core powers are never listed there; they are always on.
+  const host = () => {
+    const known = ["streamProxy", "mirrors", "clientFetch", "identity", "search", "cast"];
+    if (!hosted) {
+      $("host").innerHTML = '<span class="hint">No mHub host. This is a plain browser: ' +
+        'no mhub.fetch, no mhub.storage, no capabilities.</span>';
+      return;
+    }
+    const play = device.canPlay
+      ? ["hls", "dash", "drm"].filter((k) => device.canPlay[k]).join(", ") || "none"
+      : "unknown";
+    $("host").innerHTML =
+      '<div class="row"><span>Platform</span><span class="price">' + esc(device.platform || "?") + "</span></div>" +
+      '<div class="row"><span>TV</span><span class="price">' + (device.isTV ? "yes" : "no") + "</span></div>" +
+      '<div class="row"><span>Plays natively</span><span class="price">' + esc(play) + "</span></div>" +
+      '<div class="chips">' + known.concat(caps.filter((c) => known.indexOf(c) === -1)).map((c) =>
+        '<span class="chip' + (can(c) ? " on" : "") + '">' + esc(c) + "</span>").join("") + "</div>";
+  };
+  host();
+
+  // -------------------------------------------------------------- levels --
+  // A tile opened to its full size is one level deep in the page's own
+  // navigation. The host's back button knows nothing about that, so the page
+  // claims it: while the depth is above zero, a back press comes here as an
+  // mhubback event instead of leaving the site. Settings count as a level too.
+  const depth = () => document.querySelectorAll(".overlay.open").length;
+  const claim = () => { if (hosted && window.mhub.setBackHandler) window.mhub.setBackHandler(depth()); };
+  const openLevel = (title, html) => {
+    $("levelTitle").textContent = title;
+    $("levelBody").innerHTML = html;
+    $("level").classList.add("open");
+    $("levelClose").focus();
+    claim();
+  };
+  const closeTop = () => {
+    const open = document.querySelectorAll(".overlay.open");
+    if (open.length) {
+      const top = open[open.length - 1];
+      top.classList.remove("open");
+      if (top.id === "tv") stopTv();
+    }
+    claim();
+  };
+  addEventListener("mhubback", closeTop);
+  // A click on the dark backdrop closes the dialog, like Escape or Back. It
+  // must have started there too: a drag that ends outside an input is not a
+  // close.
+  document.querySelectorAll(".overlay").forEach((ov) => {
+    let armed = false;
+    ov.addEventListener("mousedown", (e) => { armed = e.target === ov; });
+    ov.addEventListener("click", (e) => {
+      if (armed && e.target === ov) closeTop();
+      armed = false;
+    });
+  });
+  addEventListener("keydown", (e) => { if (e.key === "Escape" && depth()) closeTop(); });
+  $("levelClose").addEventListener("click", closeTop);
+  const opens = (el, fn) => {
+    el.addEventListener("click", (e) => { if (!e.target.closest("a, button")) fn(); });
+    el.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target === el) fn(); });
+  };
+
+  // --------------------------------------------------------------- clock --
+  const clock = () => {
+    const now = new Date();
+    $("time").textContent = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    $("date").textContent = now.toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" });
+  };
+  clock();
+  setInterval(clock, 10 * 1000);
+
+  // A line of values as one polyline, no axes: the trend is the message.
+  const spark = (points, cls) => {
+    const min = Math.min.apply(null, points), max = Math.max.apply(null, points);
+    const y = (v) => 110 - ((v - min) / ((max - min) || 1)) * 100;
+    return '<svg class="spark' + (cls ? " " + cls : "") + '" viewBox="0 0 600 120" preserveAspectRatio="none"><polyline points="' +
+      points.map((v, i) => (i / (points.length - 1) * 600).toFixed(1) + "," + y(v).toFixed(1)).join(" ") +
+      '"></polyline></svg>';
+  };
+
+  // ------------------------------------------------------------- weather --
+  // Open-Meteo is free, needs no key and allows cross-origin reads, so this
+  // tile works everywhere. Not every useful API is that friendly; that is
+  // what the other tiles are about.
+  const WMO = [
+    [0, "Clear"], [2, "Partly cloudy"], [3, "Overcast"], [48, "Fog"],
+    [57, "Drizzle"], [67, "Rain"], [77, "Snow"], [82, "Rain showers"],
+    [86, "Snow showers"], [99, "Thunderstorm"],
+  ];
+  const geocode = async (name, count) => {
+    const geo = await (await get(
+      "https://geocoding-api.open-meteo.com/v1/search?count=" + count + "&name=" +
+      encodeURIComponent(name))).json();
+    return geo.results || [];
+  };
+  const weather = async () => {
+    try {
+      const place = (await geocode(config.city, 1))[0];
+      if (!place) throw new Error("unknown city");
+      const w = await (await get(
+        "https://api.open-meteo.com/v1/forecast?current=temperature_2m,weather_code" +
+        "&daily=temperature_2m_min,temperature_2m_max&hourly=temperature_2m" +
+        "&forecast_hours=24&timezone=auto" +
+        "&latitude=" + place.latitude + "&longitude=" + place.longitude)).json();
+      const code = w.current.weather_code;
+      const desc = (WMO.find((m) => code <= m[0]) || WMO[WMO.length - 1])[1];
+      $("wtitle").textContent = "Weather · " + place.name;
+      $("weather").innerHTML =
+        '<div id="temp">' + Math.round(w.current.temperature_2m) + "°</div>" +
+        '<div id="wdesc"></div><div id="wrange"></div>' +
+        // The next 24 hours as one line; the numbers above say today's span.
+        spark(w.hourly.temperature_2m, "small");
+      $("wdesc").textContent = desc;
+      $("wrange").textContent = Math.round(w.daily.temperature_2m_min[0]) +
+        "° to " + Math.round(w.daily.temperature_2m_max[0]) + "° today";
+    } catch (e) {
+      $("weather").innerHTML = '<span class="hint">No weather. Check the city in the settings.</span>';
+    }
+  };
+  weather();
+  setInterval(weather, 15 * 60 * 1000);
+
+  // ------------------------------------------------------------ calendar --
+  // Any calendar exports a private ICS address, and almost none of them sends
+  // CORS headers: reading yours is exactly what mhub.fetch is for. The file
+  // is parsed here, recurrences expanded just far enough for a week.
+  const unfold = (text) => text.replace(/\r?\n[ \t]/g, "").split(/\r?\n/);
+  const icsDate = (v, params) => {
+    // 20260830 (a whole day) or 20260830T193000(Z). TZID is read as local
+    // time: good enough for a glance at the week.
+    const m = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?(Z)?)?$/.exec(v);
+    if (!m) return null;
+    const allDay = !m[4] || /VALUE=DATE(?!-)/.test(params || "");
+    const d = m[7]
+      ? new Date(Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)))
+      : new Date(+m[1], m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
+    return { d: d, allDay: allDay };
+  };
+  const BYDAYS = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 };
+  const parseIcs = (text, from, to) => {
+    const out = [];
+    let ev = null;
+    for (const line of unfold(text)) {
+      if (line === "BEGIN:VEVENT") { ev = {}; continue; }
+      if (!ev) continue;
+      if (line === "END:VEVENT") {
+        if (ev.start) out.push(...expand(ev, from, to));
+        ev = null;
+        continue;
+      }
+      const i = line.indexOf(":");
+      if (i === -1) continue;
+      const key = line.slice(0, i), value = line.slice(i + 1);
+      const name = key.split(";")[0];
+      if (name === "DTSTART") ev.start = icsDate(value, key);
+      else if (name === "DTEND") ev.end = icsDate(value, key);
+      else if (name === "SUMMARY") ev.summary = value.replace(/\\([,;nN])/g, (x, c) => c === ";" || c === "," ? c : "\n");
+      else if (name === "RRULE") ev.rrule = value;
+      else if (name === "EXDATE") (ev.ex = ev.ex || []).push(...value.split(",").map((v) => (icsDate(v, key) || {}).d + ""));
+    }
+    return out;
+  };
+  const expand = (ev, from, to) => {
+    const one = (d) => ({ at: d, allDay: ev.start.allDay, summary: ev.summary || "(untitled)" });
+    if (!ev.rrule) {
+      return ev.start.d >= from && ev.start.d < to ? [one(ev.start.d)] : [];
+    }
+    // FREQ, INTERVAL, UNTIL, COUNT and weekly BYDAY cover the calendars of
+    // real life; the rest of RFC 5545 is out of scope for a week's glance.
+    const r = {};
+    ev.rrule.split(";").forEach((kv) => { const p = kv.split("="); r[p[0]] = p[1]; });
+    const interval = +(r.INTERVAL || 1);
+    const until = r.UNTIL ? (icsDate(r.UNTIL) || {}).d : null;
+    let count = r.COUNT ? +r.COUNT : Infinity;
+    const days = r.FREQ === "WEEKLY" && r.BYDAY
+      ? r.BYDAY.split(",").map((d) => BYDAYS[d]).filter((d) => d !== undefined)
+      : null;
+    const out = [];
+    const cur = new Date(ev.start.d);
+    for (let guard = 0; guard < 1000 && cur < to && count > 0; guard++) {
+      const emit = (d) => {
+        if (d >= from && d < to && (!until || d <= until) && !(ev.ex || []).includes(d + "")) out.push(one(new Date(d)));
+      };
+      if (days) {
+        // A weekly rule with BYDAY fires on each listed weekday of the week.
+        for (const dow of days) {
+          const d = new Date(cur);
+          d.setDate(d.getDate() + ((dow - d.getDay() + 7) % 7));
+          if (d >= ev.start.d && count > 0) { emit(d); count--; }
+        }
+      } else {
+        emit(cur); count--;
+      }
+      if (until && cur > until) break;
+      if (r.FREQ === "DAILY") cur.setDate(cur.getDate() + interval);
+      else if (r.FREQ === "WEEKLY") cur.setDate(cur.getDate() + 7 * interval);
+      else if (r.FREQ === "MONTHLY") cur.setMonth(cur.getMonth() + interval);
+      else if (r.FREQ === "YEARLY") cur.setFullYear(cur.getFullYear() + interval);
+      else break;
+    }
+    return out;
+  };
+  const calendar = async () => {
+    if (!config.ics.length) {
+      settingsHint($("calendar"), "The week ahead, from the private ICS address of any calendar.", "calendar");
+      return;
+    }
+    // No early gate for the plain browser: an ICS behind CORS headers works
+    // there too, so the fetch is always tried and the hint comes after.
+    if (hosted && !needsWeb($("calendar"), "Reading your calendar")) return;
+    const from = new Date(); from.setHours(0, 0, 0, 0);
+    const to = new Date(from); to.setDate(to.getDate() + 7);
+    const events = [];
+    let failed = 0;
+    for (const url of config.ics) {
+      try {
+        events.push(...parseIcs(await (await get(url)).text(), from, to));
+      } catch (e) { failed++; }
+    }
+    if (failed && !events.length) {
+      $("calendar").innerHTML = '<span class="hint">The calendar did not answer. ' +
+        (hosted ? "Check the address in the settings." :
+          "Most ICS addresses are only readable inside an mHub app.") + "</span>";
+      return;
+    }
+    events.sort((a, b) => a.at - b.at);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const dayName = (d) => {
+      const diff = Math.round((d - today) / 864e5);
+      return diff === 0 ? "Today" : diff === 1 ? "Tomorrow"
+        : d.toLocaleDateString([], { weekday: "long" });
+    };
+    let html = "", lastDay = "";
+    for (const ev of events.slice(0, 8)) {
+      const day = new Date(ev.at); day.setHours(0, 0, 0, 0);
+      const label = dayName(day);
+      if (label !== lastDay) { html += '<div class="day">' + label + "</div>"; lastDay = label; }
+      html += '<div class="event"><span class="at">' +
+        (ev.allDay ? "all day" : ev.at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })) +
+        '</span><span class="what">' + esc(ev.summary) + "</span></div>";
+    }
+    if (events.length > 8) html += '<div class="hint">and ' + (events.length - 8) + " more this week</div>";
+    $("calendar").innerHTML = html || '<span class="hint">Nothing in the next seven days.</span>';
+  };
+
+  // -------------------------------------------------------------- crypto --
+  // CoinGecko allows cross-origin reads, so this tile works in any browser.
+  // It is here as the contrast to the two tiles after it: same kind of data,
+  // and only the CORS header decides whether a plain website may have it.
+  const cap = (s) => s[0].toUpperCase() + s.slice(1);
+  const markets = async () => {
+    try {
+      const p = await (await get(
+        "https://api.coingecko.com/api/v3/simple/price" +
+        "?ids=" + config.coins.join(",") + "&vs_currencies=usd&include_24hr_change=true")).json();
+      $("markets").innerHTML = config.coins.map((id) => {
+        const c = p[id] || {}, chg = c.usd_24h_change || 0;
+        if (c.usd === undefined) return '<div class="row"><span>' + esc(id) + '</span><span class="hint">?</span></div>';
+        return '<div class="row"><span>' + cap(id) +
+          '</span><span class="price">$' + Math.round(c.usd).toLocaleString() +
+          ' <span class="' + (chg >= 0 ? "up" : "down") + '">' +
+          (chg >= 0 ? "+" : "") + chg.toFixed(1) + "%</span></span></div>";
+      }).join("");
+    } catch (e) {
+      $("markets").innerHTML = '<span class="hint">No prices right now.</span>';
+    }
+  };
+  markets();
+  setInterval(markets, 5 * 60 * 1000);
+
+  // The week, one line per coin. Opened from the tile, closed by the back
+  // button: this is the level the page claims.
+  opens($("cryptoTile"), async () => {
+    openLevel("Crypto, the last seven days", '<span class="hint">Loading…</span>');
+    try {
+      const charts = await Promise.all(config.coins.map((id) => get(
+        "https://api.coingecko.com/api/v3/coins/" + id + "/market_chart?vs_currency=usd&days=7&interval=daily"
+      ).then((r) => r.json())));
+      $("levelBody").innerHTML = config.coins.map((id, i) => {
+        const prices = charts[i].prices.map((p) => p[1]);
+        const chg = (prices[prices.length - 1] / prices[0] - 1) * 100;
+        return '<div class="row"><span>' + cap(id) + '</span><span class="price">$' +
+          Math.round(prices[prices.length - 1]).toLocaleString() +
+          ' <span class="' + (chg >= 0 ? "up" : "down") + '">' + (chg >= 0 ? "+" : "") +
+          chg.toFixed(1) + "% this week</span></span></div>" + spark(prices);
+      }).join("");
+    } catch (e) {
+      $("levelBody").innerHTML = '<span class="hint">No chart right now.</span>';
+    }
+  });
+
+  // ---------------------------------------------------- stocks and metals --
+  // Yahoo Finance sends no CORS header, and it answers only to requests that
+  // look like a browser. A page cannot set User-Agent, the browser reserves
+  // it; mhub.fetch builds the request natively, so it can.
+  const NAMES = { "GC=F": "Gold", "SI=F": "Silver" };
+  const stocks = async () => {
+    if (!needsWeb($("stocks"), "Quoting stocks and metals")) return;
+    const rows = await Promise.all(config.symbols.map(async (sym) => {
+      try {
+        const r = await (await get(
+          "https://query1.finance.yahoo.com/v8/finance/chart/" +
+          encodeURIComponent(sym) + "?range=1d&interval=1d",
+          { headers: { "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36" } }
+        )).json();
+        const m = r.chart.result[0].meta;
+        const chg = (m.regularMarketPrice / m.chartPreviousClose - 1) * 100;
+        return { name: NAMES[sym] || m.shortName || sym, price: m.regularMarketPrice, chg: chg };
+      } catch (e) {
+        return { name: sym, price: null };
+      }
+    }));
+    $("stocks").innerHTML = rows.map((r) =>
+      '<div class="row"><span>' + esc(r.name) + '</span><span class="price">' +
+      (r.price === null ? '<span class="hint">no quote</span>' :
+        "$" + r.price.toLocaleString(undefined, { maximumFractionDigits: 2 }) +
+        ' <span class="' + (r.chg >= 0 ? "up" : "down") + '">' +
+        (r.chg >= 0 ? "+" : "") + r.chg.toFixed(1) + "%</span>") +
+      "</span></div>").join("");
+  };
+
+  // ---------------------------------------------------------- currencies --
+  // The ECB publishes its reference rates as one XML file, daily, no key.
+  // Also without a CORS header, so a plain website cannot read it either.
+  const fx = async () => {
+    if (!needsWeb($("fx"), "Reading the ECB rates")) return;
+    try {
+      const xml = new DOMParser().parseFromString(await (await get(
+        "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml")).text(), "text/xml");
+      const rates = {};
+      xml.querySelectorAll("Cube[currency]").forEach((c) => {
+        rates[c.getAttribute("currency")] = Number(c.getAttribute("rate"));
+      });
+      $("fx").innerHTML = config.fx.map((cur) =>
+        '<div class="row"><span>1 EUR</span><span class="price">' +
+        (rates[cur] ? rates[cur].toLocaleString(undefined, { maximumFractionDigits: 4 }) + " " + esc(cur)
+          : '<span class="hint">' + esc(cur) + "?</span>") +
+        "</span></div>").join("");
+    } catch (e) {
+      $("fx").innerHTML = '<span class="hint">No rates right now.</span>';
+    }
+  };
+
+  // ---------------------------------------------------------- headlines --
+  // Two sources, and the difference between them is the demo. Wikipedia's
+  // "In the news" comes from the Wikimedia feed API, which allows
+  // cross-origin reads, so it works everywhere. Your own feeds are RSS, and
+  // almost no feed sends CORS headers: a plain website cannot read them,
+  // mhub.fetch can.
+  const wikiNews = async (d) => {
+    const path = d.getUTCFullYear() + "/" +
+      String(d.getUTCMonth() + 1).padStart(2, "0") + "/" +
+      String(d.getUTCDate()).padStart(2, "0");
+    const feed = await (await get(
+      "https://api.wikimedia.org/feed/v1/wikipedia/en/featured/" + path)).json();
+    return (feed.news || []).slice(0, 5).map((n) => ({
+      src: "Wikipedia · In the news",
+      title: new DOMParser().parseFromString(n.story, "text/html")
+        .body.textContent.replace(/\s+/g, " ").trim(),
+    }));
+  };
+
+  let allNews = [];
+  const itemHtml = (it) =>
+    '<div class="item"><div>' + esc(it.title) + '</div>' +
+    '<div class="src">' + esc(it.src) + "</div></div>";
+  const news = async () => {
+    const items = [];
+    try {
+      items.push(...await wikiNews(new Date()));
+    } catch (e) {
+      // Today's page appears during the UTC day; fall back to yesterday.
+      try { items.push(...await wikiNews(new Date(Date.now() - 864e5))); }
+      catch (e2) { /* offline; the hint below covers it */ }
+    }
+    const feedsOk = hosted && permission !== "deny";
+    if (feedsOk) {
+      for (const url of config.feeds) {
+        try {
+          const xml = new DOMParser().parseFromString(await (await get(url)).text(), "text/xml");
+          const src = (xml.querySelector("channel > title, feed > title") || {}).textContent || url;
+          xml.querySelectorAll("item, entry").forEach((n, i) => {
+            if (i < 12) items.push({
+              src: src, feed: true, first: i < 4,
+              title: (n.querySelector("title") || {}).textContent || "",
+            });
+          });
+        } catch (e) { /* a dead feed is not news */ }
+      }
+    }
+    allNews = items;
+    // The tile shows the top of each feed; the level shows all of it.
+    let html = items.filter((it) => !it.feed || it.first).map(itemHtml).join("");
+    if (!feedsOk && config.feeds.length) {
+      html += '<div class="item"><span class="hint">Your own feeds are RSS, and a plain browser ' +
+        'cannot read those. Inside an mHub app they load too. <a href="https://mhub.mx">Why?</a></span></div>';
+    }
+    $("news").innerHTML = html ||
+      '<span class="hint">No headlines right now. Check the settings, or the network.</span>';
+  };
+  opens($("newsTile"), () => {
+    openLevel("Headlines, all of them", '<div class="columns">' +
+      (allNews.map(itemHtml).join("") || '<span class="hint">Nothing loaded yet.</span>') + "</div>");
+  });
+
+  // -------------------------------------------------------------- status --
+  // Your own machines: a NAS, a router, a home server. Browsers refuse these
+  // requests (local addresses, http, no CORS); the host makes them natively.
+  const status = async () => {
+    if (!needsWeb($("status"), "Checking your servers")) return;
+    if (!config.status.length) {
+      settingsHint($("status"), "Watches your own machines: a server, a NAS, a router.", "status");
+      return;
+    }
+    const rows = await Promise.all(config.status.map(async (url) => {
+      const t0 = performance.now();
+      try {
+        const r = await get(url);
+        return { url, ok: r.ok, ms: Math.round(performance.now() - t0) };
+      } catch (e) {
+        return { url, ok: false, ms: null };
+      }
+    }));
+    $("status").innerHTML = rows.map((r) =>
+      '<div class="row"><span><span class="dot ' + (r.ok ? "ok" : "fail") + '"></span>' +
+      esc(r.url.replace(/^https?:\/\//, "")) + "</span>" +
+      '<span class="ms">' + (r.ms === null ? "down" : r.ms + " ms") + "</span></div>").join("");
+  };
+
+  // --------------------------------------------------------- price watch --
+  // Shop pages send no CORS headers and often no page at all to a bare
+  // request; mhub.fetch asks like a browser and may read the answer. The
+  // price is wherever the shop put it: JSON-LD offers, og meta tags or an
+  // itemprop. The history lives in mhub.storage, one point a day, and the
+  // sparkline is the point of the whole tile.
+  const UA = { "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36" };
+  const findPrice = (doc) => {
+    for (const el of doc.querySelectorAll('script[type="application/ld+json"]')) {
+      try {
+        const walk = (n) => {
+          if (!n || typeof n !== "object") return null;
+          if (Array.isArray(n)) { for (const x of n) { const r = walk(x); if (r) return r; } return null; }
+          if (n.price !== undefined) return { price: n.price, currency: n.priceCurrency };
+          for (const k of ["offers", "priceSpecification", "@graph", "hasVariant"]) {
+            const r = walk(n[k]); if (r) return r;
+          }
+          return null;
+        };
+        const r = walk(JSON.parse(el.textContent));
+        if (r && Number(String(r.price).replace(",", "."))) {
+          return { price: Number(String(r.price).replace(",", ".")), currency: r.currency };
+        }
+      } catch (e) { /* broken JSON-LD is the norm */ }
+    }
+    const meta = doc.querySelector('meta[property="og:price:amount"], meta[property="product:price:amount"], [itemprop="price"][content]');
+    if (meta) {
+      const cur = doc.querySelector('meta[property="og:price:currency"], meta[property="product:price:currency"], [itemprop="priceCurrency"][content]');
+      const v = Number(String(meta.getAttribute("content")).replace(",", "."));
+      if (v) return { price: v, currency: cur ? cur.getAttribute("content") : undefined };
+    }
+    return null;
+  };
+  const priceHistory = async () => JSON.parse((await store.get("prices")) || "{}");
+  const prices = async () => {
+    if (!config.prices.length) {
+      settingsHint($("prices"), "Watches the prices on product pages over time.", "prices");
+      return;
+    }
+    if (hosted && !needsWeb($("prices"), "Reading shop pages")) return;
+    const hist = await priceHistory();
+    const rows = [];
+    let failed = 0;
+    for (const url of config.prices) {
+      const h = hist[url] || { points: [] };
+      try {
+        const doc = new DOMParser().parseFromString(
+          await (await get(url, { headers: UA })).text(), "text/html");
+        const found = findPrice(doc);
+        if (!found) throw new Error("no price on the page");
+        const og = doc.querySelector('meta[property="og:title"]');
+        h.name = (og ? og.getAttribute("content") : doc.title || url).slice(0, 80);
+        if (found.currency) h.currency = found.currency;
+        const last = h.points[h.points.length - 1];
+        // One point a day keeps years of history small; a changed price
+        // lands immediately.
+        if (!last || last[1] !== found.price || Date.now() - last[0] > 20 * 3600 * 1000) {
+          h.points.push([Date.now(), found.price]);
+          if (h.points.length > 400) h.points.shift();
+        }
+        hist[url] = h;
+        rows.push({ url: url, h: h, price: found.price });
+      } catch (e) {
+        failed++;
+        if (h.points.length) rows.push({ url: url, h: h, price: h.points[h.points.length - 1][1], stale: true });
+        else rows.push({ url: url, h: { name: url.replace(/^https?:\/\/(www\.)?/, "").slice(0, 40) }, price: null });
+      }
+    }
+    const keep = {};
+    config.prices.forEach((u) => { if (hist[u]) keep[u] = hist[u]; });
+    await store.set("prices", JSON.stringify(keep));
+    if (failed === config.prices.length && !rows.some((r) => r.price !== null) && !hosted) {
+      asleep($("prices"), "Reading shop pages");
+      return;
+    }
+    const money = (v, cur) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }) + (cur ? " " + cur : "");
+    $("prices").innerHTML = rows.map((r) => {
+      const pts = (r.h.points || []).map((pt) => pt[1]);
+      const first = pts[0];
+      const chg = first && pts.length > 1 ? (r.price / first - 1) * 100 : null;
+      return '<div class="row"><span class="who">' + esc(r.h.name) + '</span><span class="price">' +
+        (r.price === null ? '<span class="hint">no price</span>' :
+          money(r.price, r.h.currency) + (r.stale ? ' <span class="hint">stale</span>' : "") +
+          (chg === null || Math.abs(chg) < 0.05 ? "" :
+            ' <span class="' + (chg <= 0 ? "up" : "down") + '">' +
+            (chg > 0 ? "+" : "") + chg.toFixed(1) + "%</span>")) +
+        "</span></div>";
+    }).join("");
+  };
+  opens($("pricesTile"), async () => {
+    if (!config.prices.length) return openTileSettings("prices");
+    openLevel("Price watch, the history", skel(3));
+    const hist = await priceHistory();
+    const items = config.prices.filter((u) => hist[u] && hist[u].points.length > 1);
+    $("levelBody").innerHTML = items.map((u) => {
+      const h = hist[u];
+      return '<div class="row"><span class="who">' + esc(h.name) + '</span><span class="price">' +
+        h.points[h.points.length - 1][1].toLocaleString() + (h.currency ? " " + h.currency : "") +
+        "</span></div>" + spark(h.points.map((pt) => pt[1]));
+    }).join("") || '<span class="hint">The history grows one point a day; nothing to draw yet.</span>';
+  });
+
+  // --------------------------------------------------------------- radio --
+  // SomaFM streams straight to any browser, so the audio works everywhere.
+  // Inside an mHub app the URL still goes through mhub.openStream: that is the
+  // one way to start external media there. These streams need no headers, so
+  // the host hands the URL back untouched (proxied: false) and nothing
+  // prompts. A stream that DID need a Referer or a token would come back as a
+  // loopback URL on hosts with the streamProxy capability, and the page
+  // would play it exactly the same way.
+  const STATIONS = [
+    ["Groove Salad", "https://ice1.somafm.com/groovesalad-128-mp3"],
+    ["Drone Zone", "https://ice1.somafm.com/dronezone-128-mp3"],
+    ["Lush", "https://ice1.somafm.com/lush-128-mp3"],
+  ];
+  const audio = new Audio();
+  let playing = null;   // the openStream answer, or a plain { url }
+  const stopRadio = () => {
+    audio.pause();
+    audio.removeAttribute("src");
+    if (playing && hosted && window.mhub.closeStream) window.mhub.closeStream(playing.url);
+    playing = null;
+    radio();
+  };
+  const playRadio = async (url) => {
+    if (playing) {
+      const same = playing.station === url;
+      stopRadio();
+      if (same) return;
+    }
+    try {
+      const s = hosted ? await window.mhub.openStream({ url: url }) : { url: url, proxied: false };
+      s.station = url;
+      playing = s;
+      audio.src = s.url;
+      await audio.play();
+      radio();
+    } catch (e) {
+      playing = null;
+      radio("Could not start the stream.");
+    }
+  };
+  const radio = (note) => {
+    $("radio").innerHTML = STATIONS.map((s) =>
+      '<div class="station"><span class="who">' + esc(s[0]) + '</span><button type="button" data-url="' +
+      esc(s[1]) + '" class="' + (playing && playing.station === s[1] ? "playing" : "") + '">' +
+      (playing && playing.station === s[1] ? "Stop" : "Play") + "</button></div>").join("") +
+      '<div class="hint" style="margin-top:8px">' + esc(note || (playing
+        ? (playing.proxied ? "Playing through the host's stream proxy." : "Playing directly.")
+        : hosted ? "Started with mhub.openStream." : "In a plain browser the audio tag plays these itself.")) + "</div>";
+    $("radio").querySelectorAll("button").forEach((b) =>
+      b.addEventListener("click", () => playRadio(b.getAttribute("data-url"))));
+  };
+  audio.addEventListener("error", () => { if (playing) { playing = null; radio("Stream failed."); } });
+  radio();
+
+  // ------------------------------------------------------------- live tv --
+  // Channels come from the iptv-org addon on mhub.mx, in Addon Protocol v2:
+  // one catalog, searchable, and every item carries its stream address. The
+  // tile plays them full screen; the level behind the title is the search.
+  const ADDONS = "https://www.mhub.mx";
+  const tvVideo = document.querySelector("#tv video");
+  let tvHls = null, tvStream = null;
+  const loadHlsJs = () => new Promise((res, rej) => {
+    if (window.Hls) return res();
+    const el = document.createElement("script");
+    el.src = "https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js";
+    el.onload = res; el.onerror = () => rej(new Error("no hls.js"));
+    document.head.appendChild(el);
+  });
+  const stopTv = () => {
+    tvVideo.pause();
+    if (tvHls) { tvHls.destroy(); tvHls = null; }
+    tvVideo.removeAttribute("src"); tvVideo.load();
+    if (tvStream && hosted && window.mhub.closeStream) window.mhub.closeStream(tvStream.url);
+    tvStream = null;
+    if (hosted) window.mhub.setImmersive(false);
+  };
+  const playTv = async (url) => {
+    stopRadio();
+    try {
+      // cors: true because hls.js reads the stream with XHR; the host proxies
+      // only where the CDN would refuse that read.
+      tvStream = hosted ? await window.mhub.openStream({ url: url, cors: true }) : { url: url };
+    } catch (e) { return; }
+    $("tv").classList.add("open");
+    claim();
+    if (hosted) window.mhub.setImmersive(true);
+    const useHls = /\.m3u8/.test(url) && await loadHlsJs().then(() => Hls.isSupported(), () => false);
+    if (useHls) {
+      tvHls = new Hls();
+      tvHls.loadSource(tvStream.url);
+      tvHls.attachMedia(tvVideo);
+    } else {
+      tvVideo.src = tvStream.url;
+    }
+    tvVideo.play().catch(() => {});
+  };
+  $("tvClose").addEventListener("click", closeTop);
+  const tvlist = () => {
+    $("tvlist").innerHTML = (config.channels.map((c, i) =>
+      '<div class="station"><span class="who">' + esc(c.name) +
+      '<span class="now" data-now="' + i + '"></span></span>' +
+      '<button type="button" data-url="' + esc(c.url) + '">Play</button></div>').join("") ||
+      '<span class="hint">No channels yet. Open the tile and search.</span>');
+    $("tvlist").querySelectorAll("button").forEach((b) =>
+      b.addEventListener("click", () => playTv(b.getAttribute("data-url"))));
+    nowPlaying();
+  };
+  // The addon sends each channel's EPG on the item, so "what is on" is one
+  // request per channel. Channels added before ids were stored just miss it.
+  const nowPlaying = async () => {
+    for (let i = 0; i < config.channels.length; i++) {
+      const c = config.channels[i];
+      if (!c.id) continue;
+      try {
+        const item = await (await get(ADDONS + "/iptv-org/item/live/" +
+          encodeURIComponent("urlId:" + c.id) + ".json")).json();
+        const now = new Date();
+        const on = (item.epg || []).find((e) => new Date(e.start) <= now && now < new Date(e.end));
+        const el = $("tvlist").querySelector('[data-now="' + i + '"]');
+        if (el && on) el.textContent = on.title +
+          " · until " + new Date(on.end).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      } catch (e) { /* no programme is fine */ }
+    }
+  };
+  setInterval(nowPlaying, 10 * 60 * 1000);
+  tvlist();
+  const channelSearch = async (q) => {
+    const box = document.querySelector("#level .results");
+    if (!box) return;
+    box.innerHTML = skel(4);
+    try {
+      const res = await (await get(ADDONS + "/iptv-org/catalog/live/channels.json?search=" +
+        encodeURIComponent(q))).json();
+      const mine = config.channels.map((c) => c.url);
+      box.innerHTML = res.items.slice(0, 20).map((it, i) =>
+        '<div class="station"><span class="who">' + esc(it.name) + '</span>' +
+        '<button type="button" data-i="' + i + '">' +
+        (mine.indexOf(it.url) === -1 ? "Add" : "Remove") + "</button></div>").join("") ||
+        '<span class="hint">Nothing found.</span>';
+      box.querySelectorAll("button").forEach((b) =>
+        b.addEventListener("click", async () => {
+          const it = res.items[+b.getAttribute("data-i")];
+          const at = config.channels.findIndex((c) => c.url === it.url);
+          if (at === -1) config.channels.push({ name: it.name, id: it.id, url: it.url });
+          else config.channels.splice(at, 1);
+          await save();
+          tvlist();
+          channelSearch(q);
+        }));
+    } catch (e) {
+      box.innerHTML = '<span class="hint">The channel list did not answer.</span>';
+    }
+  };
+  opens($("tvTile"), () => {
+    openLevel("Live TV, find channels",
+      '<input id="chq" type="search" placeholder="Channel name, e.g. tagesschau24" autocomplete="off">' +
+      '<div class="results"><span class="hint">Search the public iptv-org list, then Play from the tile.</span></div>');
+    const input = $("chq");
+    let t = null;
+    input.addEventListener("input", () => {
+      clearTimeout(t);
+      t = setTimeout(() => { if (input.value.trim()) channelSearch(input.value.trim()); }, 300);
+    });
+    input.focus();
+  });
+
+  // ----------------------------------------------------------- mediathek --
+  // The first row of the ARD Mediathek addon, four stills, straight to
+  // playback. The same v2 addon the Mediathek app is built on; this tile is
+  // its doorstep.
+  const mediathek = async () => {
+    try {
+      const manifest = await (await get(ADDONS + "/ard-mediathek/mhub-addon.json")).json();
+      const row = (manifest.dashboard || [])[0] || { name: manifest.catalogs[0].name, catalog: manifest.catalogs[0].id };
+      const cat = await (await get(ADDONS + "/ard-mediathek/catalog/video/" +
+        encodeURIComponent(row.catalog) + ".json")).json();
+      const picks = cat.items.filter((it) => it.type === "video" && !it.directory && it.images).slice(0, 4);
+      $("mtitle").textContent = "Mediathek · " + row.name;
+      $("mediathek").innerHTML = '<div class="thumbs">' + picks.map((it, i) =>
+        '<button type="button" class="thumb" data-i="' + i + '"><img alt="" loading="lazy" src="' +
+        esc(it.images.poster) + '"><span>' + esc(it.name) + "</span></button>").join("") + "</div>";
+      $("mediathek").querySelectorAll(".thumb").forEach((b) =>
+        b.addEventListener("click", async () => {
+          const it = picks[+b.getAttribute("data-i")];
+          try {
+            const item = await (await get(ADDONS + "/ard-mediathek/item/video/" +
+              encodeURIComponent("ard:" + it.id) + ".json")).json();
+            const src = (item.sources || [])[0];
+            if (src) playTv(src.url);
+          } catch (e) { /* the tile stays; nothing to play */ }
+        }));
+    } catch (e) {
+      $("mediathek").innerHTML = '<span class="hint">The Mediathek did not answer.</span>';
+    }
+  };
+  mediathek();
+  setInterval(mediathek, 30 * 60 * 1000);
+
+  // -------------------------------------------------------------- search --
+  // The host's own search field, scoped to this page: the address bar on a
+  // phone or desktop, a search affordance on TV. No input of our own. A query
+  // is a city, a ticker or a currency, and the suggestions say which.
+  const looksLikeTicker = (q) => /^[A-Z0-9.=^-]{1,8}$/.test(q) && /[A-Z]/.test(q);
+  const applyQuery = async (q) => {
+    q = q.trim();
+    if (!q) return;
+    if (/^[A-Z]{3}$/i.test(q) && config.fx.indexOf(q.toUpperCase()) === -1 && !(await geocode(q, 1)).length) {
+      config.fx.push(q.toUpperCase()); await save(); fx(); return;
+    }
+    if (looksLikeTicker(q)) {
+      if (config.symbols.indexOf(q) === -1) config.symbols.push(q);
+      await save(); stocks(); return;
+    }
+    config.city = q; await save(); weather();
+  };
+  if (hosted && window.mhub.setSearch) {
+    window.mhub.setSearch({
+      placeholder: "City, ticker or currency",
+      onQuery: applyQuery,
+      onSuggest: async (q) => {
+        q = q.trim();
+        if (!q) return [];
+        const out = [];
+        if (looksLikeTicker(q)) out.push({ text: q.toUpperCase() });
+        try {
+          (await geocode(q, 5)).forEach((p) => out.push({
+            text: p.name + (p.country ? ", " + p.country : ""),
+          }));
+        } catch (e) { /* no suggestions, no harm */ }
+        return out.slice(0, 8);
+      },
+    });
+  }
+
+  news();
+  setInterval(news, 10 * 60 * 1000);
+  stocks();
+  setInterval(stocks, 5 * 60 * 1000);
+  fx();
+  setInterval(fx, 60 * 60 * 1000);
+  status();
+  setInterval(status, 60 * 1000);
+  calendar();
+  setInterval(calendar, 15 * 60 * 1000);
+  prices();
+  setInterval(prices, 60 * 60 * 1000);
+
+  // ------------------------------------------------------------ settings --
+  // One dialog, one tile at a time. Each entry says which config keys the
+  // tile owns, how their fields parse, and what to refresh after a save.
+  const FIELDS = {
+    weather: { title: "Weather", refresh: () => weather(), fields: [
+      { key: "city", label: "City", kind: "text", placeholder: "Zurich" }] },
+    calendar: { title: "Calendar", refresh: () => calendar(), fields: [
+      { key: "ics", label: "One ICS address per line, the private address of any calendar", kind: "lines" }] },
+    crypto: { title: "Crypto", refresh: () => markets(), fields: [
+      { key: "coins", label: "CoinGecko ids", kind: "csv", lower: true, placeholder: "bitcoin, ethereum" }] },
+    stocks: { title: "Stocks & metals", refresh: () => stocks(), fields: [
+      { key: "symbols", label: "Yahoo Finance tickers", kind: "csv", upper: true, placeholder: "GC=F, SI=F, AAPL" }] },
+    fx: { title: "Currencies", refresh: () => fx(), fields: [
+      { key: "fx", label: "Currencies, against the euro", kind: "csv", upper: true, placeholder: "USD, CHF, GBP" }] },
+    status: { title: "Status", refresh: () => status(), fields: [
+      { key: "status", label: "One address per line: your servers, your NAS, your router", kind: "lines" }] },
+    prices: { title: "Price watch", refresh: () => prices(), fields: [
+      { key: "prices", label: "One product page per line", kind: "lines" }] },
+    news: { title: "Headlines", refresh: () => news(), fields: [
+      { key: "feeds", label: "News feeds, one address per line", kind: "lines" }] },
+  };
+  let dialogFor = null; // a tile key, or "tiles" for the visibility list
+  const openDialog = () => {
+    $("settings").classList.add("open");
+    const first = $("settingsBody").querySelector("input, textarea");
+    if (first) first.focus();
+    claim();
+  };
+  openTileSettings = (tile) => {
+    const def = FIELDS[tile];
+    dialogFor = tile;
+    $("settingsTitle").textContent = def.title;
+    $("settingsBody").innerHTML = def.fields.map((f) =>
+      '<label for="f_' + f.key + '">' + esc(f.label) + "</label>" +
+      (f.kind === "lines"
+        ? '<textarea id="f_' + f.key + '"></textarea>'
+        : '<input id="f_' + f.key + '" placeholder="' + esc(f.placeholder || "") + '">')).join("");
+    def.fields.forEach((f) => {
+      $("f_" + f.key).value = f.kind === "text" ? config[f.key]
+        : config[f.key].join(f.kind === "lines" ? "\n" : ", ");
+    });
+    openDialog();
+  };
+  // The gear on every tile that has something to set.
+  Object.keys(FIELDS).forEach((tile) => {
+    const el = document.querySelector('[data-tile="' + tile + '"]');
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "tgear";
+    b.setAttribute("aria-label", FIELDS[tile].title + " settings");
+    b.textContent = "\u2699";
+    b.addEventListener("click", () => openTileSettings(tile));
+    el.appendChild(b);
+  });
+  // The footer keeps the one thing that is about the page, not a tile:
+  // which tiles there are.
+  $("gear").addEventListener("click", () => {
+    dialogFor = "tiles";
+    $("settingsTitle").textContent = "Tiles";
+    $("settingsBody").innerHTML = '<div id="fTiles">' +
+      Array.prototype.map.call(document.querySelectorAll("[data-tile]"), (el) => {
+        const id = el.getAttribute("data-tile");
+        return '<label><input type="checkbox" data-t="' + id + '"' +
+          (config.hidden.indexOf(id) === -1 ? " checked" : "") + ">" +
+          esc(el.querySelector("h2").textContent.split("\u00b7")[0].replace("\u2699", "").trim()) + "</label>";
+      }).join("") + "</div>";
+    openDialog();
+  });
+  $("cancel").addEventListener("click", closeTop);
+  $("settingsForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (dialogFor === "tiles") {
+      config.hidden = Array.prototype.filter.call(
+        $("settingsBody").querySelectorAll("input"), (i) => !i.checked)
+        .map((i) => i.getAttribute("data-t"));
+      await save();
+      applyHidden();
+      closeTop();
+      return;
+    }
+    const def = FIELDS[dialogFor];
+    def.fields.forEach((f) => {
+      const raw = $("f_" + f.key).value;
+      if (f.kind === "text") {
+        config[f.key] = raw.trim() || DEFAULTS[f.key];
+        return;
+      }
+      let list = raw.split(f.kind === "lines" ? "\n" : ",").map((v) => v.trim()).filter(Boolean);
+      if (f.upper) list = list.map((v) => v.toUpperCase());
+      if (f.lower) list = list.map((v) => v.toLowerCase());
+      config[f.key] = list;
+    });
+    await save();
+    closeTop();
+    def.refresh();
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "name": "mhub-glance",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The Glance showcase, on a domain of its own",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "license": "MIT"
+}
